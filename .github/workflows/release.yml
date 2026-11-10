@@ -3,8 +3,9 @@
 # workflow), so pull requests and forks never reach the secrets.
 #
 # Inputs: source_ref (branch, tag or commit of qrmomen-offline), tag (release tag here, such as
-# v1.32.0), publish (off builds without releasing) and play_track (Play Console track that receives
-# the App Bundle as a draft release; none skips Play).
+# v1.32.0), publish (off builds without releasing) and play_track (testing track that receives the
+# App Bundle as a draft release; none skips Play). Play accepts each versionCode once, so production
+# gets a build by promoting the tested release in Play Console, never by uploading it again.
 #
 # Secrets
 #   SOURCE_REPO_TOKEN: fine-grained token with Contents read-only on indramahkota/qrmomen-offline.
@@ -30,10 +31,10 @@ on:
         type: boolean
         default: true
       play_track:
-        description: Upload the App Bundle to this Play Console track as a draft (none skips Play)
+        description: Upload the App Bundle to this testing track as a draft (none skips Play; promote to production in Play Console)
         type: choice
         default: none
-        options: [none, internal, alpha, beta, production]
+        options: [none, internal, alpha, beta]
 
 permissions:
   contents: write
@@ -217,7 +218,7 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.qrmomen.app
           releaseFiles: android/QRMomen-android.aab
-          track: ${{ inputs.play_track }}
+          tracks: ${{ inputs.play_track }}
           # A draft waits in Play Console for release notes and review, under Managed publishing.
           status: draft
 

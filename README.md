@@ -1,6 +1,8 @@
 # QRMomen releases
 
-QRMomen installers for Android, iOS, macOS, Windows and Linux, built from the QRMomen source repository. Each [release](https://github.com/indramahkota/qrmomen-releases/releases) contains every installer and `SHA256SUMS`.
+QRMomen installers for Android, iOS, macOS, Windows and Linux. Each [release](https://github.com/indramahkota/qrmomen-releases/releases) contains every installer and `SHA256SUMS`.
+
+The workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) builds the installers from the private QRMomen source repository and publishes each release here. This repository holds no application source.
 
 | Platform | File | Minimum |
 | --- | --- | --- |

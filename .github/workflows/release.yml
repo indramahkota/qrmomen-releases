@@ -1,0 +1,212 @@
+# Builds every QRMomen installer from the private source repository indramahkota/qrmomen-offline and
+# publishes them as a release of this repository. Runs only when started by hand (Actions, Run
+# workflow), so pull requests and forks never reach the secrets.
+#
+# Inputs: source_ref (branch, tag or commit of qrmomen-offline), tag (release tag here, such as
+# v1.32.0) and publish (off builds without releasing).
+#
+# Secrets
+#   SOURCE_REPO_TOKEN: fine-grained token with Contents read-only on indramahkota/qrmomen-offline.
+#   ANDROID_RELEASE_KEY_ALIAS, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_PASSWORD,
+#     ANDROID_RELEASE_KEYSTORE_BASE64: Android upload key.
+#   Optional: IOS_* and MACOS_* signing secrets, listed in each job below.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag or commit of qrmomen-offline
+        required: true
+        default: main
+      tag:
+        description: Release tag in this repository, such as v1.32.0
+        required: true
+      publish:
+        description: Publish the release (off builds only)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+      MACOS_NOTARIZATION_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+      MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS arm64, runner: macos-15 }
+          - { name: macOS x64, runner: macos-15-intel }
+          - { name: Windows x64, runner: windows-2025 }
+          - { name: Linux x64, runner: ubuntu-24.04 }
+          - { name: Linux arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: indramahkota/qrmomen-offline
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm fakeroot
+
+      - name: WiX for jpackage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+
+      - name: macOS signing certificate
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm certificate.p12
+
+      - name: Package
+        shell: bash
+        run: scripts/desktop-installers.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}-${{ runner.arch }}
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: indramahkota/qrmomen-offline
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Release keystore
+        run: |
+          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+            echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_STORE_FILE=$GITHUB_WORKSPACE/keystore/release.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: scripts/android-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  ios:
+    name: iOS
+    runs-on: macos-15
+    env:
+      IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+      IOS_EXPORT_OPTIONS_PLIST: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: indramahkota/qrmomen-offline
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: iOS signing
+        if: env.IOS_CERTIFICATE_P12 != ''
+        run: |
+          echo "$IOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import certificate.p12 -k build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm certificate.p12
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/qrmomen.mobileprovision"
+          echo "$IOS_EXPORT_OPTIONS_PLIST" | base64 --decode > "$RUNNER_TEMP/ExportOptions.plist"
+          echo "IOS_EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: scripts/ios-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  release:
+    if: inputs.publish
+    needs: [desktop, android, ios]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cat artifacts/*.sha256 > artifacts/SHA256SUMS
+          gh release create "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --target main --title "QRMomen $TAG" \
+            --notes "QRMomen for macOS, Windows, Linux, Android and iOS. Verify downloads against SHA256SUMS."

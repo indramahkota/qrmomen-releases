@@ -3,12 +3,15 @@
 # workflow), so pull requests and forks never reach the secrets.
 #
 # Inputs: source_ref (branch, tag or commit of qrmomen-offline), tag (release tag here, such as
-# v1.32.0) and publish (off builds without releasing).
+# v1.32.0), publish (off builds without releasing) and play_track (Play Console track that receives
+# the App Bundle as a draft release; none skips Play).
 #
 # Secrets
 #   SOURCE_REPO_TOKEN: fine-grained token with Contents read-only on indramahkota/qrmomen-offline.
 #   ANDROID_RELEASE_KEY_ALIAS, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_PASSWORD,
 #     ANDROID_RELEASE_KEYSTORE_BASE64: Android upload key.
+#   PLAY_SERVICE_ACCOUNT_JSON: JSON key of the Google Cloud service account that has release
+#     permission for com.qrmomen.app in Play Console. Needed only when play_track is not none.
 #   Optional: IOS_* and MACOS_* signing secrets, listed in each job below.
 name: Release
 
@@ -26,6 +29,11 @@ on:
         description: Publish the release (off builds only)
         type: boolean
         default: true
+      play_track:
+        description: Upload the App Bundle to this Play Console track as a draft (none skips Play)
+        type: choice
+        default: none
+        options: [none, internal, alpha, beta, production]
 
 permissions:
   contents: write
@@ -191,6 +199,27 @@ jobs:
           name: ios
           path: build/release-artifacts/*
           if-no-files-found: error
+
+  play:
+    name: Google Play
+    if: inputs.play_track != 'none'
+    needs: android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: android
+
+      # Pinned to the commit of v1.1.5: this step holds the Play release key.
+      - uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.qrmomen.app
+          releaseFiles: android/QRMomen-android.aab
+          track: ${{ inputs.play_track }}
+          # A draft waits in Play Console for release notes and review, under Managed publishing.
+          status: draft
 
   release:
     if: inputs.publish

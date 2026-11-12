@@ -1,14 +1,16 @@
-# Builds every QRMomen installer from the private source repository indramahkota/qrmomen-offline and
+# Builds every QRMomen installer from the private source repository indramahkota/qrmomen and
 # publishes them as a release of this repository. Runs only when started by hand (Actions, Run
 # workflow), so pull requests and forks never reach the secrets.
 #
-# Inputs: source_ref (branch, tag or commit of qrmomen-offline), tag (release tag here, such as
+# Inputs: source_ref (branch, tag or commit of qrmomen), core_ref (branch
+# or tag of indramahkota/kmp-core, which qrmomen includes from ../kmp-core), tag (release tag here, such as
 # v1.32.0), publish (off builds without releasing) and play_track (testing track that receives the
 # App Bundle as a draft release; none skips Play). Play accepts each versionCode once, so production
 # gets a build by promoting the tested release in Play Console, never by uploading it again.
 #
 # Secrets
-#   SOURCE_REPO_TOKEN: fine-grained token with Contents read-only on indramahkota/qrmomen-offline.
+#   SOURCE_REPO_TOKEN: fine-grained token with Contents read-only on indramahkota/qrmomen and
+#     indramahkota/kmp-core.
 #   ANDROID_RELEASE_KEY_ALIAS, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_PASSWORD,
 #     ANDROID_RELEASE_KEYSTORE_BASE64: Android upload key.
 #   PLAY_SERVICE_ACCOUNT_JSON: JSON key of the Google Cloud service account that has release
@@ -20,7 +22,11 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Branch, tag or commit of qrmomen-offline
+        description: Branch, tag or commit of qrmomen
+        required: true
+        default: main
+      core_ref:
+        description: Branch or tag of kmp-core
         required: true
         default: main
       tag:
@@ -62,10 +68,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: indramahkota/qrmomen-offline
+          repository: indramahkota/qrmomen
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
 
       - uses: actions/setup-java@v4
         with:
@@ -120,10 +135,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: indramahkota/qrmomen-offline
+          repository: indramahkota/qrmomen
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
 
       - uses: actions/setup-java@v4
         with:
@@ -161,10 +185,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: indramahkota/qrmomen-offline
+          repository: indramahkota/qrmomen
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
 
       - uses: actions/setup-java@v4
         with:

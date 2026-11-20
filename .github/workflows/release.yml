@@ -376,7 +376,7 @@ jobs:
         run: |
           mkdir artifacts
           find downloads -mindepth 2 -type f \( -name '*.apk' -o -name '*.dmg' -o -name '*.msi' -o -name '*.zip' \
-            -o -name '*.deb' -o -name '*.rpm' \) ! -path 'downloads/windows-executable/*' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*-unsigned.ipa' \) ! -path 'downloads/windows-executable/*' \
             -exec sh -c 'cp "$1" "$1.sha256" artifacts/' _ {} \;
           cat artifacts/*.sha256 > artifacts/SHA256SUMS
 
@@ -405,6 +405,7 @@ jobs:
             artifacts/*.zip
             artifacts/*.deb
             artifacts/*.rpm
+            artifacts/*-unsigned.ipa
 
       - name: Publish
         env:
@@ -412,4 +413,4 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           gh release create "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --target main --title "QRMomen $TAG" \
-            --notes "QRMomen for macOS, Windows, Linux and Android. Verify a download with: gh attestation verify <file> -R indramahkota/qrmomen-releases"
+            --notes "QRMomen for Android, iOS (unsigned IPA), macOS, Windows and Linux. Verify a download with: gh attestation verify <file> -R indramahkota/qrmomen-releases"

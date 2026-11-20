@@ -1,0 +1,415 @@
+# Builds the QRMomen installers and publishes them as a release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag or commit of qrmomen
+        required: true
+        default: main
+      core_ref:
+        description: Branch or tag of kmp-core
+        required: true
+        default: main
+      tag:
+        description: Release tag in this repository, such as v1.32.0
+        required: true
+      publish:
+        description: Publish the release (off builds only)
+        type: boolean
+        default: true
+      play_track:
+        description: Google Play testing track for the App Bundle draft
+        type: choice
+        default: none
+        options: [none, internal, alpha, beta]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  macos:
+    name: Desktop macOS arm64
+    runs-on: macos-15
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+      MACOS_NOTARIZATION_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+      MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: macOS signing certificate
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm certificate.p12
+
+      - name: Package
+        run: scripts/desktop-native-installers.sh macos
+
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: desktop-macos-arm64
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  linux:
+    name: Desktop ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x64, target: linux, artifact: desktop-linux-x64 }
+          - { name: Windows x64 executable, target: windows-bin, artifact: '' }
+    steps:
+      - name: Build tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip zip build-essential libsdl3-dev libsqlite3-dev \
+            libfontconfig-dev libfreetype-dev libpng-dev debhelper rpm \
+            libdbus-1-dev pkg-config binutils-mingw-w64-x86-64 gcc-mingw-w64-x86-64
+
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Package
+        shell: bash
+        run: scripts/desktop-native-installers.sh ${{ matrix.target }}
+
+      - if: matrix.artifact != ''
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: ${{ matrix.artifact }}
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+      - name: Windows executable for the MSI job
+        if: matrix.target == 'windows-bin'
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: windows-executable
+          path: app/desktop-native/build/bin/mingwX64/releaseExecutable/
+          if-no-files-found: error
+
+  windows:
+    name: Desktop Windows x64
+    env:
+      WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+      WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+    needs: linux
+    runs-on: windows-2025
+    environment: ${{ inputs.publish && 'release' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-executable
+          path: app/desktop-native/build/bin/mingwX64/releaseExecutable
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Signing tool
+        if: env.WINDOWS_CODESIGN_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+
+      - name: Sign the executable
+        if: env.WINDOWS_CODESIGN_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:WINDOWS_CODESIGN_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 /d QRMomen app\desktop-native\build\bin\mingwX64\releaseExecutable\desktop-native.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: MSI
+        shell: bash
+        run: scripts/desktop-native-installers.sh windows
+
+      - name: Sign the MSI
+        if: env.WINDOWS_CODESIGN_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:WINDOWS_CODESIGN_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 /d QRMomen build\release-artifacts\QRMomen-windows-x64.msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item "$env:RUNNER_TEMP\codesign.pfx"
+
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $stage = "build\native-installers\zip\QRMomen"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Recurse app\desktop-native\build\bin\mingwX64\releaseExecutable\* $stage
+          Rename-Item "$stage\desktop-native.exe" QRMomen.exe
+          Compress-Archive -Path $stage -DestinationPath build\release-artifacts\QRMomen-windows-x64.zip -Force
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd build/release-artifacts
+          for f in QRMomen-windows-x64.msi QRMomen-windows-x64.zip; do sha256sum "$f" > "$f.sha256"; done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: desktop-windows-x64
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Release keystore
+        run: |
+          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+            echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_STORE_FILE=$GITHUB_WORKSPACE/keystore/release.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: scripts/android-release.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: android
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  ios:
+    name: iOS
+    runs-on: macos-15
+    env:
+      IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+      IOS_EXPORT_OPTIONS_PLIST: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: kmp-core beside the source
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          REF: ${{ inputs.core_ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$REF" "https://x-access-token:${TOKEN}@github.com/indramahkota/kmp-core.git" ../kmp-core
+          git -C ../kmp-core remote remove origin
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: iOS signing
+        if: env.IOS_CERTIFICATE_P12 != ''
+        run: |
+          echo "$IOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import certificate.p12 -k build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm certificate.p12
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/qrmomen.mobileprovision"
+          echo "$IOS_EXPORT_OPTIONS_PLIST" | base64 --decode > "$RUNNER_TEMP/ExportOptions.plist"
+          echo "IOS_EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: scripts/ios-release.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 30
+          name: ios
+          path: build/release-artifacts/*
+          if-no-files-found: error
+
+  play:
+    name: Google Play
+    if: inputs.play_track != 'none'
+    needs: android
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: android
+          path: android
+
+      - uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.qrmomen.app
+          releaseFiles: android/QRMomen-android.aab
+          tracks: ${{ inputs.play_track }}
+          status: draft
+
+  release:
+    if: inputs.publish
+    needs: [macos, linux, windows, android, ios]
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: downloads
+
+      - name: Installers
+        run: |
+          mkdir artifacts
+          find downloads -mindepth 2 -type f \( -name '*.apk' -o -name '*.dmg' -o -name '*.msi' -o -name '*.zip' \
+            -o -name '*.deb' -o -name '*.rpm' \) ! -path 'downloads/windows-executable/*' \
+            -exec sh -c 'cp "$1" "$1.sha256" artifacts/' _ {} \;
+          cat artifacts/*.sha256 > artifacts/SHA256SUMS
+
+      # SHA256SUMS.asc: signed by the QRMomen Release Signing key
+      # (81D7 08D0 0646 F5F4 5E25 97BF BB16 9B8B DC7C 8F32).
+      - name: Sign SHA256SUMS
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          export GNUPGHOME="$(mktemp -d)"
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+            --armor --detach-sign --output artifacts/SHA256SUMS.asc artifacts/SHA256SUMS
+          gpg --batch --verify artifacts/SHA256SUMS.asc artifacts/SHA256SUMS
+          rm -rf "$GNUPGHOME"
+          ls -l artifacts
+
+      # Verify: gh attestation verify <file> -R indramahkota/qrmomen-releases
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/*.apk
+            artifacts/*.dmg
+            artifacts/*.msi
+            artifacts/*.zip
+            artifacts/*.deb
+            artifacts/*.rpm
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --target main --title "QRMomen $TAG" \
+            --notes "QRMomen for macOS, Windows, Linux and Android. Verify a download with: gh attestation verify <file> -R indramahkota/qrmomen-releases"

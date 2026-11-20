@@ -278,7 +278,26 @@ jobs:
         with:
           retention-days: 30
           name: android
-          path: build/release-artifacts/*
+          path: build/release-artifacts/QRMomen-android.apk*
+          if-no-files-found: error
+
+      - name: Encrypt App Bundle
+        if: inputs.play_track != 'none'
+        env:
+          AAB_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          test -n "$AAB_PASSPHRASE"
+          printf '%s' "$AAB_PASSPHRASE" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass stdin \
+            -in build/release-artifacts/QRMomen-android.aab \
+            -out build/release-artifacts/QRMomen-android.aab.enc
+          rm -f build/release-artifacts/QRMomen-android.aab build/release-artifacts/QRMomen-android.aab.sha256
+
+      - uses: actions/upload-artifact@v7
+        if: inputs.play_track != 'none'
+        with:
+          retention-days: 1
+          name: android-aab
+          path: build/release-artifacts/QRMomen-android.aab.enc
           if-no-files-found: error
 
   ios:
@@ -351,8 +370,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: android
+          name: android-aab
           path: android
+
+      - name: Decrypt App Bundle
+        env:
+          AAB_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          test -n "$AAB_PASSPHRASE"
+          printf '%s' "$AAB_PASSPHRASE" | openssl enc -d -aes-256-cbc -pbkdf2 -pass stdin \
+            -in android/QRMomen-android.aab.enc \
+            -out android/QRMomen-android.aab
+          rm -f android/QRMomen-android.aab.enc
 
       - uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
         with:

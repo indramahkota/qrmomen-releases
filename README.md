@@ -78,6 +78,7 @@ QRMomen is built with Kotlin Multiplatform and Compose Multiplatform, running na
 | --- | --- | --- |
 | Android (APK) | [QRMomen-android.apk](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/QRMomen-android.apk) | Android 10 |
 | Android (Google Play) | [QRMomen on Google Play](https://play.google.com/store/apps/details?id=com.qrmomen.app) | Android 10 |
+| iOS (unsigned IPA) | [QRMomen-ios-unsigned.ipa](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/QRMomen-ios-unsigned.ipa) | iOS 18.5+ (sideloading) |
 | macOS (Apple silicon) | [QRMomen-macos-arm64.dmg](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/QRMomen-macos-arm64.dmg) | macOS 12+ |
 | Windows | [QRMomen-windows-x64.msi](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/QRMomen-windows-x64.msi), [QRMomen-windows-x64.zip](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/QRMomen-windows-x64.zip) (portable) | Windows 10+ x64 |
 | Linux (Debian, Ubuntu) | [qrmomen-linux-amd64.deb](https://github.com/indramahkota/qrmomen-releases/releases/latest/download/qrmomen-linux-amd64.deb) | Ubuntu 25.04+, Debian 13+ (SDL3) |
@@ -87,6 +88,7 @@ QRMomen is built with Kotlin Multiplatform and Compose Multiplatform, running na
 
 ## Installation Notes
 
+- **iOS:** the `.ipa` is unsigned and must be signed with your own Apple ID (for example via AltStore or Sideloadly) before installing.
 - **macOS:** first launch with `Control-click` → `Open`.
 - **Windows:** the MSI installs per user. The zip is portable: extract and open `QRMomen.exe`.
 - **Camera:** photos, videos and QR scanning on every platform. Linux records, plays and compresses video with GStreamer 1.x and an H.264 encoder (`x264enc`, `openh264enc` or `avenc_h264`), which the packages recommend.

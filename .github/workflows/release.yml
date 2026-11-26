@@ -438,7 +438,7 @@ jobs:
           ls -l artifacts
 
       # Verify: gh attestation verify <file> -R indramahkota/qrmomen-releases
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             artifacts/*.apk

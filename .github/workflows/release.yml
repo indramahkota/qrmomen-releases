@@ -382,6 +382,7 @@ jobs:
           path: qrmomen-source
 
       - name: Stage release notes
+        id: whatsnew
         run: qrmomen-source/scripts/play-whatsnew.sh whatsnew
 
       - name: Decrypt App Bundle
@@ -401,6 +402,7 @@ jobs:
           releaseFiles: android/QRMomen-android.aab
           tracks: ${{ inputs.play_track }}
           status: draft
+          releaseName: ${{ steps.whatsnew.outputs.release_name }}
           whatsNewDirectory: whatsnew
 
   release:

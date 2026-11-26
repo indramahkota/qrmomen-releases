@@ -23,7 +23,7 @@ on:
       changes_not_sent_for_review:
         description: Save changes as pending in Play Console instead of sending for review
         type: boolean
-        default: true
+        default: false
       validate_only:
         description: Validate changes against Google Play API without committing
         type: boolean

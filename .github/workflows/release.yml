@@ -373,6 +373,17 @@ jobs:
           name: android-aab
           path: android
 
+      - uses: actions/checkout@v6
+        with:
+          repository: indramahkota/qrmomen
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+          path: qrmomen-source
+
+      - name: Stage release notes
+        run: qrmomen-source/scripts/play-whatsnew.sh whatsnew
+
       - name: Decrypt App Bundle
         env:
           AAB_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
@@ -390,6 +401,8 @@ jobs:
           releaseFiles: android/QRMomen-android.aab
           tracks: ${{ inputs.play_track }}
           status: draft
+          whatsNewDirectory: whatsnew
+          changesNotSentForReview: true
 
   release:
     if: inputs.publish
